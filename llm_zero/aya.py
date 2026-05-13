@@ -33,12 +33,12 @@ chrf_metric = CHRF()
 cider_scorer = Cider()
 
 # Language codes
-languages = ["ara", "eng", "zho", "hin", "ind", "ben", "nep", "sin", "swa"]
+languages = ["ara", "eng", "cmn", "hin", "ind", "ben", "nep", "sin", "swa"]
 
 language_names = {
     "ara": "Arabic",
     "eng": "English",
-    "zho": "Chinese",
+    "cmn": "Chinese",
     "hin": "Hindi",
     "ind": "Indonesian",
     "ben": "Bengali",
@@ -49,7 +49,7 @@ language_names = {
 }
 
 # CJK languages that need special tokenization
-CJK_LANGUAGES = ["zho"]
+CJK_LANGUAGES = ["cmn"]
 
 
 def tokenize_text(text, lang_code):
@@ -58,7 +58,7 @@ def tokenize_text(text, lang_code):
         # For non-CJK languages, return as is
         return text
 
-    if lang_code in ["zh", "yue"]:
+    if lang_code in ["cmn"]:
         # Chinese/Cantonese - use jieba
         try:
             return " ".join(jieba.cut(text))
