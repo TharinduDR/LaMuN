@@ -27,7 +27,6 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer
 DATASET_NAME = "tharindu/LaMuN"
 LANG = "nep"
 
-# TODO: set this to the actual model repo.
 NER_MODEL = "Saugatkafley/mbert-Nepali-NER"  # placeholder — replace with your model id
 TOKENIZER_NAME = NER_MODEL          # change if tokenizer differs from model
 
