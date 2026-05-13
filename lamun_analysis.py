@@ -1,8 +1,9 @@
 """
 LaMuN dataset analysis:
   1) Unique news_source values per language.
-  2) For each language test set, run GLiNER on the human caption and count how
-     many examples qualify as the "hard" subset (>= 4 named entities).
+  2) For each language test set, run Davlan/xlm-roberta-base-ner-hrl on the
+     human caption and count how many examples qualify as the "hard" subset
+     (>= 4 named entities of type PER / ORG / LOC).
 
 Outputs:
   - news_sources_per_language.json   (full list per language)
@@ -14,13 +15,17 @@ Outputs:
 import argparse
 import csv
 import json
-import os
 from collections import Counter
 from pathlib import Path
 
+import torch
 from datasets import load_dataset
-from gliner import GLiNER
 from tqdm import tqdm
+from transformers import (
+    AutoModelForTokenClassification,
+    AutoTokenizer,
+    pipeline,
+)
 
 # ---------- Config ----------
 
@@ -35,19 +40,15 @@ LANGUAGES = [
     "bod", "tir", "tur", "ukr", "urd", "uzb", "vie", "cym", "yor",
 ]
 
-NER_LABELS = ["person", "organization", "location", "date", "event"]
+# Davlan/xlm-roberta-base-ner-hrl emits PER / ORG / LOC.
 HARD_THRESHOLD = 4
-NER_MODEL = "urchade/gliner_multi-v2.1"
+NER_MODEL = "Davlan/xlm-roberta-base-ner-hrl"
 
 
 # ---------- Task 1: unique news sources ----------
 
 def collect_news_sources(languages, output_dir: Path, splits=("train", "test")):
-    """For each language, list unique values of the `news_source` column.
-
-    Looks across the requested splits (defaults to train + test) so the count
-    reflects the full picture, not just one split.
-    """
+    """For each language, list unique values of the `news_source` column."""
     per_language = {}
     summary_rows = []
 
@@ -82,13 +83,11 @@ def collect_news_sources(languages, output_dir: Path, splits=("train", "test")):
         })
         print(f"[news_sources] {lang}: {len(sources)} unique sources")
 
-    # Write JSON (full breakdown)
     out_json = output_dir / "news_sources_per_language.json"
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(per_language, f, ensure_ascii=False, indent=2)
     print(f"\nWrote {out_json}")
 
-    # Write CSV (summary)
     out_csv = output_dir / "news_sources_summary.csv"
     with out_csv.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
@@ -101,29 +100,32 @@ def collect_news_sources(languages, output_dir: Path, splits=("train", "test")):
     return per_language
 
 
-# ---------- Task 2: hard test set via GLiNER ----------
+# ---------- Task 2: hard test set via XLM-R NER ----------
 
 def build_hard_test_sets(
     languages,
     output_dir: Path,
     save_per_language: bool = True,
     threshold: int = HARD_THRESHOLD,
+    batch_size: int = 16,
 ):
-    """Run GLiNER on each test set's `caption` column and flag rows with
+    """Run NER on each test set's `caption` column and flag rows with
     >= `threshold` named entities as the hard subset."""
-    print(f"\nLoading GLiNER model: {NER_MODEL}")
-    model = GLiNER.from_pretrained(NER_MODEL)
+    print(f"\nLoading NER model: {NER_MODEL}")
+    tokenizer = AutoTokenizer.from_pretrained(NER_MODEL)
+    model = AutoModelForTokenClassification.from_pretrained(NER_MODEL)
 
-    # Use GPU if available
-    try:
-        import torch
-        if torch.cuda.is_available():
-            model = model.to("cuda")
-            print("GLiNER running on CUDA")
-        else:
-            print("GLiNER running on CPU (slow)")
-    except Exception:
-        pass
+    device = 0 if torch.cuda.is_available() else -1
+    print(f"Running on {'CUDA' if device == 0 else 'CPU'}")
+
+    nlp = pipeline(
+        "ner",
+        model=model,
+        tokenizer=tokenizer,
+        aggregation_strategy="simple",  # merges B-/I- spans into single entities
+        device=device,
+        batch_size=batch_size,
+    )
 
     summary_rows = []
 
@@ -138,32 +140,52 @@ def build_hard_test_sets(
             print(f"[hard_set] {lang}: no 'caption' column, skipping")
             continue
 
+        captions = [(ex.get("caption") or "").strip() for ex in ds]
+        captions_safe = [c if c else " " for c in captions]
+
+        all_entities = []
+        for start in tqdm(
+            range(0, len(captions_safe), batch_size),
+            desc=f"NER {lang}",
+        ):
+            batch = captions_safe[start : start + batch_size]
+            try:
+                results = nlp(batch)
+            except Exception as e:
+                print(f"  [{lang} batch {start}] failed ({e}); per-example fallback")
+                results = []
+                for c in batch:
+                    try:
+                        results.append(nlp(c))
+                    except Exception as inner:
+                        print(f"    skipped one: {inner}")
+                        results.append([])
+            # When a list is passed, pipeline returns a list of lists.
+            # When a single string is passed (fallback), it returns one list.
+            if results and not isinstance(results[0], list):
+                results = [results]
+            all_entities.extend(results)
+
+        assert len(all_entities) == len(captions), \
+            f"{lang}: length mismatch {len(all_entities)} vs {len(captions)}"
+
         hard_rows = []
         entity_counts = []
-
-        for idx, example in enumerate(tqdm(ds, desc=f"NER {lang}")):
-            caption = example.get("caption") or ""
-            if not caption.strip():
-                entity_counts.append(0)
-                continue
-
-            try:
-                entities = model.predict_entities(caption, NER_LABELS)
-            except Exception as e:
-                print(f"  [{lang} idx={idx}] NER failed: {e}")
-                entity_counts.append(0)
-                continue
-
-            n_ents = len(entities)
+        for idx, (caption, ents) in enumerate(zip(captions, all_entities)):
+            n_ents = len(ents)
             entity_counts.append(n_ents)
-
             if n_ents >= threshold:
                 hard_rows.append({
                     "index": idx,
                     "caption": caption,
                     "num_entities": n_ents,
                     "entities": [
-                        {"text": e["text"], "label": e["label"]} for e in entities
+                        {
+                            "text": e["word"],
+                            "label": e["entity_group"],
+                            "score": float(e["score"]),
+                        }
+                        for e in ents
                     ],
                 })
 
@@ -190,7 +212,6 @@ def build_hard_test_sets(
             with (lang_dir / "hard_test_set.json").open("w", encoding="utf-8") as f:
                 json.dump(hard_rows, f, ensure_ascii=False, indent=2)
 
-    # Write CSV summary
     out_csv = output_dir / "hard_test_set_counts.csv"
     with out_csv.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
@@ -238,6 +259,12 @@ def main():
         help="Minimum named entities for 'hard' classification (default: 4).",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size for the NER pipeline.",
+    )
+    parser.add_argument(
         "--no-per-language-files",
         action="store_true",
         help="Skip writing data/{lang}/hard_test_set.json files.",
@@ -256,12 +283,14 @@ def main():
     if args.task in ("hard", "all"):
         print("\n" + "=" * 70)
         print(f"TASK 2: Hard test set (>= {args.threshold} entities) per language")
+        print(f"NER model: {NER_MODEL}")
         print("=" * 70)
         build_hard_test_sets(
             args.languages,
             output_dir,
             save_per_language=not args.no_per_language_files,
             threshold=args.threshold,
+            batch_size=args.batch_size,
         )
 
 
