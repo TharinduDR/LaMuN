@@ -263,19 +263,3 @@ print("\nAverage Scores Across All Languages:")
 print(f"  Average BLEU-4: {results_df['bleu4'].mean():.2f}")
 print(f"  Average chrF:   {results_df['chrf'].mean():.2f}")
 print(f"  Average CIDEr:  {results_df['cider'].mean():.2f}")
-
-# Print CJK-specific averages
-cjk_results = results_df[results_df['language'].isin(CJK_LANGUAGES)]
-if not cjk_results.empty:
-    print("\nAverage Scores for CJK Languages (ja, zh, yue) - with proper tokenization:")
-    print(f"  Average BLEU-4: {cjk_results['bleu4'].mean():.2f}")
-    print(f"  Average chrF:   {cjk_results['chrf'].mean():.2f}")
-    print(f"  Average CIDEr:  {cjk_results['cider'].mean():.2f}")
-
-# Print non-CJK averages
-non_cjk_results = results_df[~results_df['language'].isin(CJK_LANGUAGES)]
-if not non_cjk_results.empty:
-    print("\nAverage Scores for Non-CJK Languages:")
-    print(f"  Average BLEU-4: {non_cjk_results['bleu4'].mean():.2f}")
-    print(f"  Average chrF:   {non_cjk_results['chrf'].mean():.2f}")
-    print(f"  Average CIDEr:  {non_cjk_results['cider'].mean():.2f}")
