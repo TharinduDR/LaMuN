@@ -1,15 +1,13 @@
 """
-LaMuN multilingual captioning evaluation with Qwen/Qwen3.5-9B-Base.
+LaMuN multilingual captioning evaluation with Qwen/Qwen3-VL-8B-Instruct.
 
-NOTE: This is the BASE (pre-trained) model, not instruction-tuned. It will
-follow instructions much more weakly than Qwen2.5-VL-7B-Instruct or
-Qwen3.5-9B (the post-trained version). Expect lower scores. To evaluate the
-instruction-tuned variant for a fairer comparison, set MODEL_PATH to
-"Qwen/Qwen3.5-9B" instead.
+Same prompt template and 9-language scope (eng, ara, cmn, hin, ind, ben,
+nep, sin, swa) as the Qwen2.5-VL-7B, Aya-Vision-8B, and Janus-Pro-7B
+baselines, so the rows are directly comparable.
 
-Qwen3.5 uses a new model class (Qwen3_5ForConditionalGeneration) but the
-AutoModel / AutoProcessor / qwen_vl_utils plumbing is shared with the
-Qwen2.5-VL family, so the eval API is the same.
+Qwen3-VL uses Qwen3VLForConditionalGeneration and supports the chat
+template directly via processor.apply_chat_template(..., tokenize=True,
+return_dict=True), removing the need for qwen_vl_utils.process_vision_info.
 """
 
 import json
@@ -17,11 +15,10 @@ import json
 import pandas as pd
 import torch
 from datasets import load_dataset
-from qwen_vl_utils import process_vision_info
 from sacrebleu.metrics import BLEU, CHRF
 from pycocoevalcap.cider.cider import Cider
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
 try:
     import jieba
@@ -33,7 +30,7 @@ except ImportError:
 
 # ---------- Config ----------
 
-MODEL_PATH = "Qwen/Qwen3.5-9B-Base"
+MODEL_PATH = "Qwen/Qwen3-VL-8B-Instruct"
 
 LANGUAGES = ["ara", "eng", "cmn", "hin", "ind", "ben", "nep", "sin", "swa"]
 
@@ -55,18 +52,14 @@ CJK_LANGUAGES = {"cmn"}
 # ---------- Model load ----------
 
 print(f"Loading {MODEL_PATH}...")
-# AutoModelForCausalLM resolves to Qwen3_5ForConditionalGeneration via the
-# config's `architectures` field. trust_remote_code is needed because the
-# model class lives in the model repo, not in transformers core yet.
-model = AutoModelForCausalLM.from_pretrained(
+model = Qwen3VLForConditionalGeneration.from_pretrained(
     MODEL_PATH,
     torch_dtype="auto",
     device_map="auto",
-    trust_remote_code=True,
 )
 model.eval()
 
-processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(MODEL_PATH)
 
 
 # ---------- Metrics ----------
@@ -88,7 +81,7 @@ def tokenize_text(text, lang_code):
 # ---------- Caption generation ----------
 
 def build_prompt(news_content: str, language_code: str) -> str:
-    """Identical prompt to the Qwen2.5-VL and Aya evaluations."""
+    """Same prompt template as the other baselines."""
     language = LANGUAGE_NAMES[language_code]
     return f"""You are writing a caption for a newspaper image.
 
@@ -108,14 +101,9 @@ Guidelines:
 Caption in {language}:"""
 
 
-def generate_caption_qwen35(image, news_content, language_code,
-                             max_new_tokens=100):
-    """Generate a caption with Qwen3.5-9B-Base.
-
-    Same chat-template flow as Qwen2.5-VL. The base model still has the
-    <|im_start|>/<|im_end|> control tokens (per the model card) so the
-    chat template is usable even though the model isn't instruction-tuned.
-    """
+def generate_caption_qwen3(image, news_content, language_code,
+                           max_new_tokens=100):
+    """Generate a caption with Qwen3-VL-8B-Instruct."""
     prompt = build_prompt(news_content, language_code)
     messages = [{
         "role": "user",
@@ -126,16 +114,12 @@ def generate_caption_qwen35(image, news_content, language_code,
     }]
 
     try:
-        text = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        image_inputs, video_inputs = process_vision_info(messages)
-
-        inputs = processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
+        # Qwen3-VL: apply_chat_template tokenises and handles images directly.
+        inputs = processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
             return_tensors="pt",
         ).to(model.device)
 
@@ -183,7 +167,7 @@ def evaluate_language(lang_code, dataset_name="tharindu/LaMuN",
 
     for i, example in enumerate(tqdm(test_data, desc=f"Generating {lang_code}")):
         try:
-            pred = generate_caption_qwen35(
+            pred = generate_caption_qwen3(
                 example["image"], example["content"], lang_code
             )
             predictions.append(pred)
@@ -244,45 +228,46 @@ def evaluate_language(lang_code, dataset_name="tharindu/LaMuN",
 
 # ---------- Main ----------
 
-all_results = []
-all_predictions, all_references = {}, {}
+if __name__ == "__main__":
+    all_results = []
+    all_predictions, all_references = {}, {}
 
-for lang in LANGUAGES:
-    try:
-        results, preds, refs = evaluate_language(
-            lang,
-            dataset_name="tharindu/LaMuN",
-            num_samples=None,  # set 10-100 for a quick smoke test
+    for lang in LANGUAGES:
+        try:
+            results, preds, refs = evaluate_language(
+                lang,
+                dataset_name="tharindu/LaMuN",
+                num_samples=None,  # set 10-100 for a quick smoke test
+            )
+            all_results.append(results)
+            all_predictions[lang] = preds
+            all_references[lang] = refs
+        except Exception as e:
+            print(f"Error evaluating {lang}: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    results_df = pd.DataFrame(all_results)
+
+    print("\n" + "=" * 80)
+    print("FINAL RESULTS SUMMARY - QWEN3-VL-8B-INSTRUCT")
+    print("=" * 80)
+    print(results_df.to_string(index=False))
+
+    results_df.to_csv("qwen3_vl_evaluation_results.csv", index=False)
+    print("\n✓ Results saved to qwen3_vl_evaluation_results.csv")
+
+    with open("qwen3_vl_predictions.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"predictions": all_predictions, "references": all_references},
+            f,
+            ensure_ascii=False,
+            indent=2,
         )
-        all_results.append(results)
-        all_predictions[lang] = preds
-        all_references[lang] = refs
-    except Exception as e:
-        print(f"Error evaluating {lang}: {e}")
-        import traceback
-        traceback.print_exc()
-        continue
+    print("✓ Predictions saved to qwen3_vl_predictions.json")
 
-results_df = pd.DataFrame(all_results)
-
-print("\n" + "=" * 80)
-print("FINAL RESULTS SUMMARY - QWEN3.5-9B-BASE")
-print("=" * 80)
-print(results_df.to_string(index=False))
-
-results_df.to_csv("qwen35_base_evaluation_results.csv", index=False)
-print("\n✓ Results saved to qwen35_base_evaluation_results.csv")
-
-with open("qwen35_base_predictions.json", "w", encoding="utf-8") as f:
-    json.dump(
-        {"predictions": all_predictions, "references": all_references},
-        f,
-        ensure_ascii=False,
-        indent=2,
-    )
-print("✓ Predictions saved to qwen35_base_predictions.json")
-
-print("\nAverage Scores Across All Languages:")
-print(f"  Average BLEU-4: {results_df['bleu4'].mean():.2f}")
-print(f"  Average chrF:   {results_df['chrf'].mean():.2f}")
-print(f"  Average CIDEr:  {results_df['cider'].mean():.2f}")
+    print("\nAverage Scores Across All Languages:")
+    print(f"  Average BLEU-4: {results_df['bleu4'].mean():.2f}")
+    print(f"  Average chrF:   {results_df['chrf'].mean():.2f}")
+    print(f"  Average CIDEr:  {results_df['cider'].mean():.2f}")
