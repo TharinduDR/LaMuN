@@ -265,7 +265,7 @@ if __name__ == "__main__":
             ensure_ascii=False,
             indent=2,
         )
-    print("✓ Predictions saved to qwen3_vl_predictions.json")
+    print("Predictions saved to qwen3_vl_predictions.json")
 
     print("\nAverage Scores Across All Languages:")
     print(f"  Average BLEU-4: {results_df['bleu4'].mean():.2f}")
