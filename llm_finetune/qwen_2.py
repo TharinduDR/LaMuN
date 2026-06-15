@@ -55,7 +55,7 @@ except ImportError:
 
 # ---------- Config: shared with the eval script ----------
 
-MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
+MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
 DATASET_NAME = "tharindu/LaMuN"
 
 LANGUAGE_NAMES = {
