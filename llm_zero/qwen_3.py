@@ -30,7 +30,7 @@ except ImportError:
 
 # ---------- Config ----------
 
-MODEL_PATH = "Qwen/Qwen3-VL-8B-Instruct"
+MODEL_PATH = "Qwen/Qwen3-VL-235B-A22B-Instruct"
 
 LANGUAGES = ["ara", "eng", "cmn", "hin", "ind", "ben", "nep", "sin", "swa"]
 
