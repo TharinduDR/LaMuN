@@ -20,14 +20,14 @@ except ImportError:
     CJK_TOKENIZATION_AVAILABLE = False
 
 # Initialize model and processor
-print("Loading Qwen2.5-VL-7B-Instruct...")
+print("Loading Qwen2.5-VL-72B-Instruct...")
 model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-    "Qwen/Qwen2.5-VL-7B-Instruct",
+    "Qwen/Qwen2.5-VL-72B-Instruct",
     torch_dtype="auto",
     device_map="auto"
 )
 
-processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct")
+processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-72B-Instruct")
 
 # Optional: Enable flash attention for better performance
 # model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
