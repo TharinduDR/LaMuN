@@ -256,7 +256,7 @@ if __name__ == "__main__":
     print(results_df.to_string(index=False))
 
     results_df.to_csv("qwen3_vl_evaluation_results.csv", index=False)
-    print("\n✓ Results saved to qwen3_vl_evaluation_results.csv")
+    print("\n Results saved to qwen3_vl_evaluation_results.csv")
 
     with open("qwen3_vl_predictions.json", "w", encoding="utf-8") as f:
         json.dump(
