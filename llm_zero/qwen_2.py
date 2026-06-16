@@ -271,13 +271,13 @@ results_df = pd.DataFrame(all_results)
 
 # Print summary
 print("\n" + "=" * 80)
-print("FINAL RESULTS SUMMARY - QWEN2.5-VL-7B-INSTRUCT")
+print("FINAL RESULTS SUMMARY - QWEN2.5-VL-72B-INSTRUCT")
 print("=" * 80)
 print(results_df.to_string(index=False))
 
 # Save results
 results_df.to_csv("qwen_vl_evaluation_results.csv", index=False)
-print("\n✓ Results saved to qwen_vl_evaluation_results.csv")
+print("\nResults saved to qwen_vl_evaluation_results.csv")
 
 # Save detailed predictions
 with open("qwen_vl_predictions.json", "w", encoding="utf-8") as f:
@@ -285,7 +285,7 @@ with open("qwen_vl_predictions.json", "w", encoding="utf-8") as f:
         "predictions": all_predictions,
         "references": all_references
     }, f, ensure_ascii=False, indent=2)
-print("✓ Predictions saved to qwen_vl_predictions.json")
+print("Predictions saved to qwen_vl_predictions.json")
 
 # Calculate averages
 print("\nAverage Scores Across All Languages:")
